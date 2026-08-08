@@ -33,6 +33,9 @@ type ScheduleRecord = {
     date: string;
     time: string;
     notes: string;
+    attendance?: AttendanceEntry[];
+    timeIn?: string;
+    timeOut?: string;
     createdAt?: { toDate?: () => Date } | null;
 };
 
@@ -59,6 +62,19 @@ export default function Dashboard() {
     const [attendanceDrafts, setAttendanceDrafts] = useState<Record<string, string>>({});
     const [attendanceRecords, setAttendanceRecords] = useState<Record<string, AttendanceEntry[]>>({});
     const [timeEntries, setTimeEntries] = useState<Record<string, TimeEntry>>({});
+
+    const attendanceSummary = schedules.reduce(
+        (summary, schedule) => {
+            const scheduleAttendance = Array.isArray(schedule.attendance) ? schedule.attendance : [];
+
+            summary.total += scheduleAttendance.length;
+            summary.present += scheduleAttendance.filter((entry) => entry.status === 'present').length;
+            summary.absent += scheduleAttendance.filter((entry) => entry.status === 'absent').length;
+
+            return summary;
+        },
+        { total: 0, present: 0, absent: 0 },
+    );
 
     function submit(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -164,6 +180,22 @@ export default function Dashboard() {
         }));
     }
 
+    async function persistAttendance(scheduleId: string, nextAttendance: AttendanceEntry[]) {
+        setAttendanceRecords((current) => ({
+            ...current,
+            [scheduleId]: nextAttendance,
+        }));
+
+        try {
+            await updateDoc(doc(db, 'schedules', scheduleId), {
+                attendance: nextAttendance,
+            });
+        } catch (error) {
+            console.error('Error saving attendance:', error);
+            setScheduleMessage('Failed to save attendance.');
+        }
+    }
+
     function addAttendanceEntry(scheduleId: string) {
         const name = (attendanceDrafts[scheduleId] ?? '').trim();
 
@@ -171,16 +203,16 @@ export default function Dashboard() {
             return;
         }
 
-        const newEntry: AttendanceEntry = {
-            id: `${scheduleId}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-            name,
-            status: 'present',
-        };
+        const nextAttendance = [
+            ...(attendanceRecords[scheduleId] ?? []),
+            {
+                id: `${scheduleId}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                name,
+                status: 'present' as AttendanceStatus,
+            },
+        ];
 
-        setAttendanceRecords((current) => ({
-            ...current,
-            [scheduleId]: [...(current[scheduleId] ?? []), newEntry],
-        }));
+        void persistAttendance(scheduleId, nextAttendance);
 
         setAttendanceDrafts((current) => ({
             ...current,
@@ -188,31 +220,40 @@ export default function Dashboard() {
         }));
     }
 
-    function updateAttendanceStatus(scheduleId: string, entryId: string, status: AttendanceStatus) {
-        setAttendanceRecords((current) => ({
-            ...current,
-            [scheduleId]: (current[scheduleId] ?? []).map((entry) =>
-                entry.id === entryId ? { ...entry, status } : entry,
-            ),
-        }));
+    async function updateAttendanceStatus(scheduleId: string, entryId: string, status: AttendanceStatus) {
+        const nextAttendance = (attendanceRecords[scheduleId] ?? []).map((entry) =>
+            entry.id === entryId ? { ...entry, status } : entry,
+        );
+
+        await persistAttendance(scheduleId, nextAttendance);
     }
 
-    function removeAttendanceEntry(scheduleId: string, entryId: string) {
-        setAttendanceRecords((current) => ({
-            ...current,
-            [scheduleId]: (current[scheduleId] ?? []).filter((entry) => entry.id !== entryId),
-        }));
+    async function removeAttendanceEntry(scheduleId: string, entryId: string) {
+        const nextAttendance = (attendanceRecords[scheduleId] ?? []).filter((entry) => entry.id !== entryId);
+        await persistAttendance(scheduleId, nextAttendance);
     }
 
-    function updateTimeEntry(scheduleId: string, field: keyof TimeEntry, value: string) {
+    async function updateTimeEntry(scheduleId: string, field: keyof TimeEntry, value: string) {
+        const nextTime = {
+            timeIn: timeEntries[scheduleId]?.timeIn ?? '',
+            timeOut: timeEntries[scheduleId]?.timeOut ?? '',
+            [field]: value,
+        };
+
         setTimeEntries((current) => ({
             ...current,
-            [scheduleId]: {
-                timeIn: current[scheduleId]?.timeIn ?? '',
-                timeOut: current[scheduleId]?.timeOut ?? '',
-                [field]: value,
-            },
+            [scheduleId]: nextTime,
         }));
+
+        try {
+            await updateDoc(doc(db, 'schedules', scheduleId), {
+                timeIn: nextTime.timeIn,
+                timeOut: nextTime.timeOut,
+            });
+        } catch (error) {
+            console.error('Error saving time entry:', error);
+            setScheduleMessage('Failed to save time entry.');
+        }
     }
 
     return (
@@ -375,6 +416,23 @@ export default function Dashboard() {
                     <section className="rounded-xl border bg-card p-4 shadow-sm xl:max-w-[560px] xl:w-full">
                         <h2 className="text-xl font-semibold">Saved Schedules</h2>
 
+                        {schedules.length > 0 && (
+                            <div className="mt-3 grid gap-2 rounded-md border bg-muted/20 p-3 text-sm sm:grid-cols-3">
+                                <div>
+                                    <p className="text-muted-foreground">Total</p>
+                                    <p className="text-base font-semibold">{attendanceSummary.total}</p>
+                                </div>
+                                <div>
+                                    <p className="text-muted-foreground">Present</p>
+                                    <p className="text-base font-semibold text-emerald-500">{attendanceSummary.present}</p>
+                                </div>
+                                <div>
+                                    <p className="text-muted-foreground">Absent</p>
+                                    <p className="text-base font-semibold text-red-500">{attendanceSummary.absent}</p>
+                                </div>
+                            </div>
+                        )}
+
                         {loadingSchedules ? (
                             <p className="mt-3 text-sm text-muted-foreground">Loading schedules...</p>
                         ) : schedules.length === 0 ? (
@@ -386,6 +444,28 @@ export default function Dashboard() {
                                         schedule.createdAt && typeof schedule.createdAt.toDate === 'function'
                                             ? schedule.createdAt.toDate()
                                             : new Date();
+                                    const scheduleAttendance = Array.isArray(schedule.attendance) ? schedule.attendance : [];
+                                    const scheduleTime = {
+                                        timeIn: schedule.timeIn ?? timeEntries[schedule.id]?.timeIn ?? '',
+                                        timeOut: schedule.timeOut ?? timeEntries[schedule.id]?.timeOut ?? '',
+                                    };
+
+                                    if (!attendanceRecords[schedule.id] && scheduleAttendance.length > 0) {
+                                        setAttendanceRecords((current) => ({
+                                            ...current,
+                                            [schedule.id]: scheduleAttendance,
+                                        }));
+                                    }
+
+                                    if (!timeEntries[schedule.id] && (schedule.timeIn || schedule.timeOut)) {
+                                        setTimeEntries((current) => ({
+                                            ...current,
+                                            [schedule.id]: {
+                                                timeIn: schedule.timeIn ?? '',
+                                                timeOut: schedule.timeOut ?? '',
+                                            },
+                                        }));
+                                    }
 
                                     return (
                                         <div key={schedule.id} className="rounded-lg border p-3">
@@ -429,10 +509,10 @@ export default function Dashboard() {
                                                 </div>
 
                                                 <div className="mt-3 space-y-2">
-                                                    {(attendanceRecords[schedule.id] ?? []).length === 0 ? (
+                                                    {(attendanceRecords[schedule.id] ?? scheduleAttendance).length === 0 ? (
                                                         <p className="text-xs text-muted-foreground">No attendance marked yet.</p>
                                                     ) : (
-                                                        (attendanceRecords[schedule.id] ?? []).map((entry) => (
+                                                        (attendanceRecords[schedule.id] ?? scheduleAttendance).map((entry) => (
                                                             <div key={entry.id} className="flex items-center justify-between gap-2 rounded-md border p-2">
                                                                 <div className="flex items-center gap-2">
                                                                     <span className="text-sm font-medium">{entry.name}</span>
@@ -481,7 +561,7 @@ export default function Dashboard() {
                                                         <Input
                                                             id={`time-in-${schedule.id}`}
                                                             type="time"
-                                                            value={timeEntries[schedule.id]?.timeIn ?? ''}
+                                                            value={scheduleTime.timeIn}
                                                             onChange={(event) => updateTimeEntry(schedule.id, 'timeIn', event.target.value)}
                                                         />
                                                     </div>
@@ -490,7 +570,7 @@ export default function Dashboard() {
                                                         <Input
                                                             id={`time-out-${schedule.id}`}
                                                             type="time"
-                                                            value={timeEntries[schedule.id]?.timeOut ?? ''}
+                                                            value={scheduleTime.timeOut}
                                                             onChange={(event) => updateTimeEntry(schedule.id, 'timeOut', event.target.value)}
                                                         />
                                                     </div>
