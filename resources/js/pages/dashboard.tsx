@@ -31,6 +31,7 @@ export default function Dashboard() {
                     <Input 
                         id="name" 
                         value={form.data.name} 
+                        placeholder="Enter employee name"
                         onChange={(event)=> form.setData('name', event.target.value)}
                         />
                         {form.errors.name && <p className="text-sm text-red-600">{form.errors.name}</p>} 
@@ -42,6 +43,7 @@ export default function Dashboard() {
                     <Input 
                         id="email" 
                         value={form.data.email} 
+                        placeholder="Enter work email"
                         onChange={(event)=> form.setData('email', event.target.value)}
                         />
                         {form.errors.email && <p className="text-sm text-red-600">{form.errors.email}</p>} 
@@ -51,6 +53,7 @@ export default function Dashboard() {
                     <Input 
                         id="phone" 
                         value={form.data.phone} 
+                        placeholder="Enter employee phone"
                         onChange={(event)=> form.setData('phone', event.target.value)}
                         />
                         {form.errors.phone && <p className="text-sm text-red-600">{form.errors.phone}</p>} 
@@ -61,6 +64,7 @@ export default function Dashboard() {
                     <Input 
                         id="address" 
                         value={form.data.address} 
+                        placeholder="Enter employee address"
                         onChange={(event)=> form.setData('address', event.target.value)}
                         />
                         {form.errors.address && <p className="text-sm text-red-600">{form.errors.address}</p>} 
@@ -70,6 +74,7 @@ export default function Dashboard() {
                     <Input 
                         id="position" 
                         value={form.data.position} 
+                        placeholder="Enter employee position"
                         onChange={(event)=> form.setData('position', event.target.value)}
                         />
                         {form.errors.position && <p className="text-sm text-red-600">{form.errors.position}</p>}
